@@ -1,0 +1,856 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Blender Progress Dashboard</title>
+  <style>
+    :root {
+      --orange: #F4762A;
+      --blue: #265787;
+      --bg: #F1F4F8;
+      --white: #FFFFFF;
+      --border: #E2E8F0;
+      --text: #1A202C;
+      --muted: #718096;
+      --green: #38A169;
+      --radius: 12px;
+      --radius-sm: 8px;
+      --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04);
+      --shadow-hover: 0 4px 20px rgba(0,0,0,0.10);
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+    /* ── MODAL ── */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(26,32,44,0.75); display: flex; align-items: center; justify-content: center; z-index: 1000; backdrop-filter: blur(3px); }
+    .modal-overlay.hidden { display: none; }
+    .modal { background: var(--white); border-radius: var(--radius); padding: 36px 32px 32px; width: 360px; max-width: 92vw; text-align: center; box-shadow: 0 24px 60px rgba(0,0,0,0.25); border-top: 4px solid var(--orange); }
+    .modal-icon { margin-bottom: 16px; }
+    .modal-icon img { width: 72px; height: 72px; object-fit: contain; }
+    .modal-title { font-size: 20px; font-weight: 800; color: var(--blue); margin-bottom: 6px; }
+    .modal-sub { font-size: 13px; color: var(--muted); line-height: 1.6; margin-bottom: 22px; }
+    .modal-input { width: 100%; padding: 11px 14px; border: 2px solid var(--border); border-radius: var(--radius-sm); font-size: 14px; font-family: inherit; outline: none; transition: border-color 0.15s; color: var(--text); background: var(--bg); margin-bottom: 6px; }
+    .modal-input:focus { border-color: var(--orange); background: var(--white); }
+    .modal-input.error { border-color: #FC8181; }
+    .modal-error { font-size: 11px; color: #E53E3E; margin-bottom: 14px; text-align: left; min-height: 16px; }
+    .modal-btn { width: 100%; padding: 13px; background: linear-gradient(135deg, var(--blue) 0%, var(--orange) 100%); color: white; border: none; border-radius: var(--radius-sm); font-size: 14px; font-weight: 700; font-family: inherit; cursor: pointer; transition: opacity 0.15s, transform 0.15s; margin-top: 8px; }
+    .modal-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+
+    /* ── HEADER ── */
+    .header { background: var(--white); border-bottom: 1px solid var(--border); padding: 0 0 20px; }
+    .header-logo-wrap { width: 100%; line-height: 0; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+    .header-logo-wrap img { width: 100%; max-height: 160px; object-fit: cover; object-position: center; display: block; }
+    .header-inner { max-width: 880px; margin: 0 auto; padding: 0 28px; }
+
+    /* ── USER BAR ── */
+    .user-bar { text-align: center; font-size: 11px; color: var(--muted); margin-bottom: 12px; min-height: 16px; }
+    .user-bar strong { color: var(--blue); font-weight: 700; }
+    .user-change { background: none; border: none; color: var(--orange); font-size: 11px; font-family: inherit; cursor: pointer; text-decoration: underline; padding: 0; }
+
+    /* ── SYNC ── */
+    .sync-row { display: flex; align-items: center; justify-content: center; gap: 5px; min-height: 14px; margin-bottom: 8px; }
+    .sync-dot { width: 6px; height: 6px; border-radius: 50%; background: transparent; transition: background 0.3s; flex-shrink: 0; }
+    .sync-dot.saving  { background: var(--orange); animation: pulse 1s infinite; }
+    .sync-dot.loading { background: var(--blue); animation: pulse 1s infinite; }
+    .sync-dot.saved   { background: var(--green); }
+    .sync-dot.offline { background: #FC8181; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+    .sync-lbl { font-size: 10px; font-weight: 600; color: transparent; transition: color 0.3s; }
+    .sync-lbl.saving  { color: var(--orange); }
+    .sync-lbl.loading { color: var(--blue); }
+    .sync-lbl.saved   { color: var(--green); }
+    .sync-lbl.offline { color: #E53E3E; }
+
+    /* ── OVERALL PROGRESS ── */
+    .overall-wrap { max-width: 540px; margin: 0 auto; }
+    .overall-meta { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+    .overall-label { font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
+    .overall-pct { font-size: 22px; font-weight: 900; color: var(--orange); font-variant-numeric: tabular-nums; }
+    .track { background: var(--border); border-radius: 99px; overflow: hidden; }
+    .track.lg { height: 10px; }
+    .track.md { height: 6px; }
+    .fill { height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--blue) 0%, var(--orange) 100%); transition: width 0.4s cubic-bezier(0.4,0,0.2,1); }
+
+    /* ── MAIN ── */
+    .main { max-width: 880px; margin: 0 auto; padding: 28px 20px 60px; }
+
+    /* ── LEGEND ── */
+    .legend { display: flex; align-items: center; gap: 18px; margin-bottom: 16px; padding: 10px 14px; background: var(--white); border: 1px solid var(--border); border-radius: var(--radius-sm); flex-wrap: wrap; }
+    .legend-label { font-size: 10px; font-weight: 800; letter-spacing: 0.8px; text-transform: uppercase; color: var(--muted); margin-right: 4px; }
+    .legend-item { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); }
+    .badge { font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 99px; white-space: nowrap; }
+    .b-time { background: #EBF4FF; color: #2B6CB0; }
+    .b-c4d  { background: #FFF3E0; color: #C05621; }
+
+    /* ── PHASE TABS ── */
+    .phase-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 24px; }
+    .ptab { background: var(--white); border: 2px solid var(--border); border-radius: var(--radius); padding: 14px 12px 12px; cursor: pointer; text-align: left; position: relative; overflow: hidden; transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s; }
+    .ptab:hover { border-color: #C8D6E5; box-shadow: var(--shadow-hover); transform: translateY(-1px); }
+    .ptab.active { border-color: var(--orange); box-shadow: 0 0 0 3px rgba(244,118,42,0.12); }
+    .ptab.complete { border-color: #68D391; }
+    .ptab-bar { position: absolute; bottom: 0; left: 0; height: 3px; background: linear-gradient(90deg, var(--blue), var(--orange)); transition: width 0.4s ease; }
+    .ptab-num { font-size: 10px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
+    .ptab-name { font-size: 12px; font-weight: 700; color: var(--text); line-height: 1.3; margin-bottom: 10px; }
+    .ptab.active .ptab-name { color: var(--orange); }
+    .ptab.complete .ptab-name { color: var(--green); }
+    .ptab-pct { font-size: 24px; font-weight: 900; color: var(--blue); font-variant-numeric: tabular-nums; }
+    .ptab.active .ptab-pct { color: var(--orange); }
+    .ptab.complete .ptab-pct { color: var(--green); }
+
+    /* ── PHASE HEADING ── */
+    .phase-heading { margin-bottom: 16px; }
+    .phase-heading-title { font-size: 20px; font-weight: 800; color: var(--blue); }
+    .phase-heading-desc { font-size: 13px; color: var(--muted); margin-top: 3px; line-height: 1.5; }
+
+    /* ── EXERCISE LIST ── */
+    .ex-list { display: flex; flex-direction: column; gap: 8px; }
+    .ex-card { background: var(--white); border: 1.5px solid var(--border); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); transition: box-shadow 0.15s; }
+    .ex-card:hover { box-shadow: var(--shadow-hover); }
+    .ex-card.is-done { border-color: #68D391; }
+    .ex-card.is-open { border-color: var(--orange); box-shadow: 0 0 0 2px rgba(244,118,42,0.10); }
+    .ex-head { display: flex; align-items: center; gap: 12px; padding: 14px 16px; cursor: pointer; user-select: none; }
+    .ex-num { width: 36px; height: 36px; border-radius: 50%; background: var(--bg); display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 800; color: var(--muted); flex-shrink: 0; transition: background 0.2s, color 0.2s; }
+    .ex-card.is-done .ex-num { background: var(--green); color: white; font-size: 16px; }
+    .ex-card.is-open .ex-num { background: var(--orange); color: white; }
+    .ex-info { flex: 1; min-width: 0; }
+    .ex-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 7px; line-height: 1.3; }
+    .ex-prog-row { display: flex; align-items: center; gap: 8px; }
+    .ex-prog-pct { font-size: 11px; font-weight: 700; color: var(--muted); width: 30px; text-align: right; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+    .ex-badges { display: flex; align-items: center; gap: 6px; flex-shrink: 0; margin-left: 4px; }
+    .ex-chevron { font-size: 11px; color: var(--muted); transition: transform 0.2s; flex-shrink: 0; margin-left: 4px; }
+    .ex-card.is-open .ex-chevron { transform: rotate(180deg); }
+    .ex-body { display: none; padding: 0 16px 16px; border-top: 1px solid var(--border); }
+    .ex-card.is-open .ex-body { display: block; }
+
+    /* ── CALLOUTS ── */
+    .callout { display: flex; gap: 10px; padding: 11px 13px; border-radius: var(--radius-sm); margin-top: 14px; font-size: 13px; line-height: 1.5; }
+    .callout-icon { font-size: 15px; flex-shrink: 0; margin-top: 1px; }
+    .callout-inner strong { display: block; font-size: 10px; font-weight: 800; letter-spacing: 0.8px; text-transform: uppercase; margin-bottom: 3px; }
+    .callout.c4d { background: #EBF8FF; border-left: 3px solid var(--blue); }
+    .callout.c4d strong { color: var(--blue); }
+    .callout.c4d .callout-inner { color: #1A365D; }
+    .callout.tip { background: #FFFAF0; border-left: 3px solid var(--orange); }
+    .callout.tip strong { color: var(--orange); }
+    .callout.tip .callout-inner { color: #7B341E; }
+
+    /* ── TASKS ── */
+    .tasks-label { font-size: 10px; font-weight: 800; letter-spacing: 0.8px; text-transform: uppercase; color: var(--muted); margin: 16px 0 8px; }
+    .task-row { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0; cursor: pointer; border-bottom: 1px solid #F7FAFC; }
+    .task-row:last-child { border-bottom: none; }
+    .task-row:hover .task-box { border-color: var(--orange); }
+    .task-box { width: 19px; height: 19px; border: 2px solid var(--border); border-radius: 5px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; transition: background 0.15s, border-color 0.15s; font-size: 11px; font-weight: 800; color: white; }
+    .task-box.ticked { background: var(--orange); border-color: var(--orange); }
+    .task-label { font-size: 13px; color: var(--text); line-height: 1.5; }
+    .task-row.done .task-label { color: var(--muted); text-decoration: line-through; }
+    .done-banner { background: linear-gradient(135deg, #F0FFF4, #C6F6D5); border: 1px solid #68D391; border-radius: var(--radius-sm); padding: 11px 14px; text-align: center; font-size: 13px; font-weight: 700; color: #276749; margin-top: 14px; }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 620px) {
+      .phase-grid { grid-template-columns: repeat(2, 1fr); }
+      .ex-badges { display: none; }
+      .main { padding: 16px 12px 40px; }
+      .header-inner { padding: 0 16px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- NAME MODAL -->
+<div class="modal-overlay hidden" id="modal-overlay">
+  <div class="modal">
+    <div class="modal-icon">
+      <img
+        src="https://raw.githubusercontent.com/nick-webmd/ib-blender-dashboard/refs/heads/main/blender_icon.png"
+        alt="Blender"
+      />
+    </div>
+    <div class="modal-title">Welcome</div>
+    <div class="modal-sub">Enter your name to save your progress across sessions and devices.</div>
+    <input
+      class="modal-input"
+      id="name-input"
+      type="text"
+      placeholder="Your name"
+      maxlength="60"
+      onkeydown="if(event.key==='Enter') startDashboard()"
+      oninput="this.classList.remove('error'); document.getElementById('modal-error').textContent='';"
+    />
+    <div class="modal-error" id="modal-error"></div>
+    <button class="modal-btn" onclick="startDashboard()">Get Started →</button>
+  </div>
+</div>
+
+<!-- HEADER -->
+<header class="header">
+  <div class="header-logo-wrap">
+    <img
+      src="https://raw.githubusercontent.com/nick-webmd/ib-blender-dashboard/refs/heads/main/blender_progress_dashboard_header.png"
+      alt="Blender Progress Dashboard"
+    />
+  </div>
+  <div class="header-inner">
+    <div class="user-bar" id="user-bar"></div>
+    <div class="overall-wrap">
+      <div class="sync-row">
+        <div class="sync-dot" id="sync-dot"></div>
+        <span class="sync-lbl" id="sync-lbl"></span>
+      </div>
+      <div class="overall-meta">
+        <span class="overall-label">Overall Progress</span>
+        <span class="overall-pct" id="overall-pct">0%</span>
+      </div>
+      <div class="track lg">
+        <div class="fill" id="overall-bar" style="width:0%"></div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- MAIN -->
+<main class="main">
+  <div class="legend">
+    <span class="legend-label">Key</span>
+    <div class="legend-item"><span class="badge b-time">10–15 min</span> Estimated exercise time</div>
+    <div class="legend-item"><span class="badge b-c4d">C4D</span> Exercise includes Cinema 4D migration notes — expand to see them</div>
+  </div>
+  <div class="phase-grid" id="phase-grid"></div>
+  <div id="content-area"></div>
+</main>
+
+<script>
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzs-DEhVTumIinhL_0XpCHeCgflSpaLKrPf1DW2hsK6f7Hvc1a71gJ_BIDcVlMmxiprKA/exec';
+
+const PHASES = [
+  {
+    id: 0,
+    label: "Orientation & Setup",
+    desc: "Get comfortable in Blender without feeling lost. C4D users will recognize more than they expect.",
+    exercises: [
+      {
+        id:"e01", num:1,
+        title:"Setting Up Blender the Right Way",
+        time:"10–15 min", c4d:true,
+        c4dNote:"Setting keymap to Industry Standard makes navigation nearly identical to C4D — Alt+MMB to orbit, same as you're used to. Do this before anything else and Blender will feel 60% more familiar immediately.",
+        tip:"No numpad on a laptop? Go to Preferences → Input → enable Emulate Numpad to use the top number row for all viewport shortcuts.",
+        tasks:[
+          "Download and install the latest stable version of Blender from blender.org",
+          "Open Blender → Edit → Preferences → Keymap → set to Industry Standard",
+          "Verify: Alt + Middle Mouse now orbits the viewport (same as C4D)",
+          "Optionally change the UI theme under Preferences → Themes",
+          "Save preferences via the hamburger menu at the bottom-left of the Preferences window"
+        ]
+      },
+      {
+        id:"e02", num:2,
+        title:"Understanding the Interface",
+        time:"15–20 min", c4d:true,
+        c4dNote:"Every panel has a direct C4D equivalent: Outliner = Object Manager, Properties Panel = Attribute Manager, Timeline = Timeline. The layout looks different but the logic is identical.",
+        tip:"Hover over any panel and press Shift+Spacebar to temporarily maximize it — great when you need a bigger viewport.",
+        tasks:[
+          "Identify the Viewport — your main 3D working canvas",
+          "Identify the Outliner (top-right) — this is your C4D Object Manager",
+          "Identify the Properties Panel (right side) — this is your C4D Attribute Manager",
+          "Identify the Timeline at the bottom of the screen",
+          "Explore Workspace tabs at the top: Layout, Modeling, Shading, Rendering",
+          "Try right-clicking in the viewport to see context menus"
+        ]
+      },
+      {
+        id:"e03", num:3,
+        title:"Viewport Navigation",
+        time:"10–15 min", c4d:true,
+        c4dNote:"With Industry Standard keymap active, navigation is nearly identical to C4D. Your muscle memory will kick in much faster than you expect.",
+        tip:"Numpad 0 locks you into the exact camera view. You'll live here during final device shot setup — get used to pressing it often.",
+        tasks:[
+          "Orbit: Alt + Middle Mouse drag",
+          "Pan: Alt + Shift + Middle Mouse drag",
+          "Zoom: Scroll wheel (or Alt + Ctrl + Middle Mouse for fine control)",
+          "Numpad 1 = Front | Numpad 3 = Right | Numpad 7 = Top",
+          "Numpad 0 = Camera view",
+          "Numpad Period (.) = Focus on selected object",
+          "Numpad 5 = Toggle Perspective / Orthographic",
+          "Practice navigating around the default cube from all angles"
+        ]
+      },
+      {
+        id:"e04", num:4,
+        title:"Working with Objects & the Outliner",
+        time:"15–20 min", c4d:true,
+        c4dNote:"Shift+A adds objects instead of C4D's top menu. Collections in the Outliner are like Null objects used for grouping in C4D — same organizational logic, different name.",
+        tip:"G, R, S are your core transform shortcuts. Get these into muscle memory early — you'll use them constantly.",
+        tasks:[
+          "Add a mesh: Shift + A → Mesh → Cube",
+          "Practice core transforms: G (Move), R (Rotate), S (Scale)",
+          "Constrain to axis: press G then X, Y, or Z — e.g. G then Z moves only up/down",
+          "Right-click an object in the Outliner to rename it",
+          "Create a Collection: right-click in Outliner → New Collection (like a C4D grouping Null)",
+          "Hide: H key | Unhide all: Alt + H",
+          "Delete: X or Delete key"
+        ]
+      }
+    ]
+  },
+  {
+    id:1,
+    label:"Device Mockup Workflow",
+    desc:"Camera, Empty, and AE export. The same concept as your C4D workflow — just new locations for the buttons.",
+    exercises:[
+      {
+        id:"e05", num:5,
+        title:"Importing a Device Model",
+        time:"15–20 min", c4d:true,
+        c4dNote:"Same as importing an .fbx into C4D — just verify scale on import. Blender and C4D use different default units so the model may come in very large or very small.",
+        tip:"You do NOT need to model the device yourself. Professional free models are on BlenderKit and Sketchfab. Modeling is a completely separate skill — don't let it block you from doing useful work right now.",
+        tasks:[
+          "Download a free device model from BlenderKit (built into Blender) or Sketchfab (export as .fbx or .obj)",
+          "Import via File → Import → FBX (or .obj / .blend depending on source)",
+          "Check scale — if model looks giant or tiny, select it and press S to rescale",
+          "Inspect the model in the Outliner — is the screen a separate object or merged into the body?",
+          "Rename objects clearly: Device_Body, Device_Screen (this naming matters later in AE)",
+          "Place all device objects into a Collection called Device"
+        ]
+      },
+      {
+        id:"e06", num:6,
+        title:"Placing an Empty on the Screen",
+        time:"15–20 min", c4d:true,
+        c4dNote:"An Empty in Blender = a Null in C4D. Exact same concept and purpose. This is the null you'll parent your screen content to in After Effects.",
+        tip:"If the screen is merged into the body with no separate object: enter Edit Mode, select the screen face, use Mesh → Snap → Cursor to Selected, then place your Empty at the 3D cursor.",
+        tasks:[
+          "Add an Empty: Shift + A → Empty → Plain Axes",
+          "Rename it Screen_Null — this exact name will appear in AE",
+          "Enable Snap: click the magnet icon in the viewport header or press Shift + Tab",
+          "Set Snap type to Face Project to snap the Empty directly to the screen surface",
+          "Position the Empty at the center of the device screen face",
+          "If device will animate: parent Empty to body — select Screen_Null, Shift-click Device_Body, press Ctrl+P → Object",
+          "If device is stationary: no parenting needed"
+        ]
+      },
+      {
+        id:"e07", num:7,
+        title:"Camera Setup & Framing",
+        time:"15–20 min", c4d:true,
+        c4dNote:"Blender's camera properties map 1:1 with C4D — focal length, sensor size, depth of field are all there in the same order you'd expect.",
+        tip:"Slightly elevated angles (15–30°) show the screen well while also revealing the device's form. Dead-on flat shots tend to feel lifeless for product work.",
+        tasks:[
+          "Add a camera: Shift + A → Camera",
+          "Press Numpad 0 to enter camera view",
+          "In Properties Panel → Camera tab: set Focal Length (35mm is a clean neutral start for devices)",
+          "Enable Lock Camera to View in the Viewport sidebar (N key → View tab) to pilot the camera",
+          "Frame your shot — consider angle and how much of the device is visible",
+          "Disable Lock Camera to View when happy with framing",
+          "Rename your camera Main_Camera in the Outliner"
+        ]
+      },
+      {
+        id:"e08", num:8,
+        title:"Basic Camera Animation",
+        time:"15–20 min", c4d:true,
+        c4dNote:"Keyframing in Blender is nearly identical to C4D. The I key inserts keyframes. Graph Editor F-Curves = C4D spline curves. Ease handles work the same way.",
+        tip:"For device mockups, subtle moves read better than dramatic ones. A gentle 15–20° orbit or soft push-in is usually all you need.",
+        tasks:[
+          "Set scene frame range in the Timeline (e.g., 0–150 for 5 seconds at 30fps)",
+          "Select your camera, move timeline playhead to frame 1",
+          "Press I → choose Location & Rotation to insert a keyframe",
+          "Move to frame 75, gently reposition or rotate the camera, press I again",
+          "Press Spacebar to preview the move",
+          "Open the Graph Editor to smooth curves (right-click a curve → Interpolation → Ease In/Out)",
+          "Review the move and adjust keyframe timing as needed"
+        ]
+      },
+      {
+        id:"e09", num:9,
+        title:"Rendering a Device Matte",
+        time:"15–20 min", c4d:true,
+        c4dNote:"This is C4D's Compositing Tag matte concept — or Object Buffers for masks — translated directly to Blender. Both holdout and solid matte approaches exist in both apps.",
+        tip:"For most device mockup jobs, the Holdout approach is cleaner and faster in AE. Use a solid color matte only when you need more control over the mask edge during compositing.",
+        tasks:[
+          "Select your device object(s)",
+          "In Properties Panel → Material tab: add a new material",
+          "Enable Holdout on the material — device renders as a transparent alpha cutout",
+          "Go to Render Properties → set Output format PNG, Color Mode RGBA",
+          "Set your Output path (the folder where rendered frames will save)",
+          "Set resolution and frame range to match your AE comp (e.g., 1920×1080, 30fps)",
+          "Press Ctrl + F12 to render the full animation",
+          "Open a rendered frame and verify the device appears as transparent alpha"
+        ]
+      },
+      {
+        id:"e10", num:10,
+        title:"AE Export (.jsx) & Handoff",
+        time:"15–20 min", c4d:true,
+        c4dNote:"Identical in concept to C4D's Export to After Effects — camera and nulls come into AE as live layers with matched transforms. Exact same workflow you already know.",
+        tip:"Frame rate mismatch between Blender and AE is the #1 cause of camera moves not matching after .jsx import. Double-check both are at the same fps before exporting.",
+        tasks:[
+          "Verify scene frame rate matches AE comp (Render Properties → Frame Rate — both should be e.g. 30fps)",
+          "Shift-click to select both Main_Camera and Screen_Null Empty",
+          "Go to File → Export → After Effects (.jsx) and save the file",
+          "In After Effects: File → Scripts → Run Script File → select your .jsx",
+          "Verify AE built a comp with a matched camera and null layer for each Empty",
+          "Import your rendered PNG matte sequence into AE",
+          "Create your screen content layer (screenshot, website, UI recording, etc.)",
+          "Parent the screen content layer to the Screen_Null layer",
+          "Use the device matte to clip and contain the screen content to the device screen"
+        ]
+      }
+    ]
+  },
+  {
+    id:2,
+    label:"Realistic Materials & Lighting",
+    desc:"Make it look like it came out of a studio. Three sliders and one HDRI go a very long way.",
+    exercises:[
+      {
+        id:"e11", num:11,
+        title:"Principled BSDF Shader Basics",
+        time:"15–20 min", c4d:true,
+        c4dNote:"Principled BSDF is Blender's all-in-one shader — equivalent to C4D's Standard Material or Redshift's Standard Material. Metal, plastic, glass — everything in one shader.",
+        tip:"Start with just three sliders: Base Color, Metallic, and Roughness. That's genuinely all you need for convincing device materials. Don't touch anything else yet.",
+        tasks:[
+          "Switch to the Shading workspace (tab at the top of the screen)",
+          "Select device body, create a new material in Material Properties",
+          "Identify these key inputs on the Principled BSDF: Base Color, Metallic, Roughness",
+          "Create an aluminum/metal material: Metallic → 1.0, Roughness → 0.15–0.25, Base Color → light grey",
+          "Create a plastic/bezel material: Metallic → 0, Roughness → 0.5–0.7, Base Color → dark grey or black",
+          "Assign each material to the correct parts of the device model",
+          "Render a test frame (F12) and evaluate the result"
+        ]
+      },
+      {
+        id:"e12", num:12,
+        title:"Glass & Screen Surface Materials",
+        time:"15–20 min", c4d:false,
+        c4dNote:null,
+        tip:"Glass in Eevee renders as solid black unless you enable both Screen Space Reflections AND Refraction in Render Properties. This is the single most common material gotcha for new Blender users.",
+        tasks:[
+          "Select the screen surface object or face",
+          "Create a new material specifically for the screen glass",
+          "Set Transmission → 1.0 and IOR → 1.45 (standard glass refraction value)",
+          "Set Roughness to 0.0–0.05 for a clean polished screen surface",
+          "In Render Properties: enable Screen Space Reflections, then check Refraction underneath it",
+          "Render a test frame and observe the screen catching environment reflections",
+          "Optional: raise Roughness to 0.1–0.2 for a subtle fingerprint/smudge effect"
+        ]
+      },
+      {
+        id:"e13", num:13,
+        title:"HDRI Lighting Setup",
+        time:"10–15 min", c4d:true,
+        c4dNote:"Same as C4D's Sky Object with an HDR image, or an HDRI environment in Octane/Redshift. One HDRI replaces your entire lighting setup and instantly makes metal and glass look convincing.",
+        tip:"For device shots, use a studio HDRI from Poly Haven (polyhaven.com) — neutral soft studio wraps work best. Rotate it with a Mapping node to control where highlights land on the device.",
+        tasks:[
+          "Download a free studio HDRI from Poly Haven (polyhaven.com)",
+          "Go to World Properties (the globe icon in the Properties Panel)",
+          "Click Use Nodes → click the yellow dot next to Color → choose Environment Texture",
+          "Click Open and load your .hdr or .exr file",
+          "Add a Texture Coordinate node and Mapping node — connect: Tex Coord → Mapping → Env Texture",
+          "Adjust HDRI Strength to 1.0–2.0 to start",
+          "Rotate the HDRI via Z Rotation in the Mapping node to place highlights on the device",
+          "Render a test frame and observe how metal and glass respond to the environment"
+        ]
+      },
+      {
+        id:"e14", num:14,
+        title:"Render Settings & Final Materials Handoff",
+        time:"15–20 min", c4d:false,
+        c4dNote:null,
+        tip:"Color management gotcha: Blender defaults to Filmic tone mapping which can look different when it lands in AE. Set View Transform to Standard before rendering for a predictable, consistent composite.",
+        tasks:[
+          "Go to Render Properties → confirm render engine is Eevee (fast, excellent for device work)",
+          "Enable: Screen Space Reflections, Ambient Occlusion. Optional: Bloom",
+          "Set Sampling to 64–128 for clean noise-free Eevee renders",
+          "In Output Properties: set resolution (1920×1080 or match AE comp) and frame rate",
+          "Set Output format PNG, Color RGBA, and specify your output folder path",
+          "Render the full animation: Ctrl + F12",
+          "In AE: import PNG sequence → Interpret Footage → Straight Alpha",
+          "Verify holdout matte and color render composite together correctly"
+        ]
+      }
+    ]
+  },
+  {
+    id:3,
+    label:"Stylized Rendering",
+    desc:"Expand your creative range with toon, flat, and sketch styles. Real use cases for your team's content.",
+    exercises:[
+      {
+        id:"e15", num:15,
+        title:"Toon / Flat Shading",
+        time:"15–20 min", c4d:true,
+        c4dNote:"This is the Blender equivalent of C4D's Cel Renderer — flat posterized lighting with a hard shadow edge. Shader to RGB + ColorRamp is the standard Blender toon approach.",
+        tip:"Use a single strong Sun Light at roughly 45° for the cleanest toon look. This creates a sharp light/shadow boundary that the ColorRamp can posterize cleanly.",
+        tasks:[
+          "Switch to the Shading workspace",
+          "Select device and open the material node editor",
+          "Delete the Principled BSDF node",
+          "Add a Diffuse BSDF node (Shift+A → Shader → Diffuse BSDF)",
+          "Add a Shader to RGB node — connect Diffuse BSDF output into it",
+          "Add a ColorRamp node — connect Shader to RGB output into it",
+          "Set ColorRamp to Constant interpolation for hard flat color bands (no gradient)",
+          "Connect ColorRamp output into an Emission shader → into Material Output",
+          "Render a test frame and observe the flat posterized lighting effect",
+          "Adjust ColorRamp stop positions to control where light and shadow divide"
+        ]
+      },
+      {
+        id:"e16", num:16,
+        title:"Freestyle Line Art",
+        time:"15–20 min", c4d:true,
+        c4dNote:"Freestyle is Blender's version of C4D's Sketch & Toon renderer. Same concept — rendered lines drawn over visible edges. Very similar control set if you've used Sketch & Toon before.",
+        tip:"Freestyle renders as a separate pass layered on top of your main render. For device work at 1080p, 1.5–2.5px line weight is clean without being too heavy or distracting.",
+        tasks:[
+          "Go to Render Properties → scroll down to Freestyle → enable it",
+          "Render a test frame (F12) — you should see black outline lines on visible device edges",
+          "Go to View Layer Properties → Freestyle Line Sets to control which edges get lines",
+          "Adjust Crease Angle — lower = more lines on subtle edges, higher = sharp edges only",
+          "In Line Style settings: adjust Thickness (1.5–3px clean lines, 5–10px bold sketch feel)",
+          "Optional: try Geometry modifier → Noise on the line style for a hand-drawn wobble",
+          "Adjust line color (dark grey often reads more naturally than pure black)",
+          "Render a final test frame and evaluate the line art"
+        ]
+      },
+      {
+        id:"e17", num:17,
+        title:"Toon + Freestyle Combined",
+        time:"15–20 min", c4d:false,
+        c4dNote:null,
+        tip:"Your Screen_Null and camera .jsx export workflow from Phase 2 works identically with stylized renders. The visual style of the render has no effect on the AE handoff process.",
+        tasks:[
+          "Apply toon/flat shading from Exercise 15 to your device materials",
+          "Enable Freestyle from Exercise 16",
+          "Set a flat solid background color in World Properties → Background Color",
+          "Add a Sun Light (Shift+A → Light → Sun) — works better than HDRI for toon rendering",
+          "Render a test frame and evaluate the combined flat shading + line art look",
+          "Adjust ColorRamp positions and line thickness until the style feels polished and intentional",
+          "Consider rendering device body and screen as separate passes for more AE compositing control",
+          "Export to AE using the same .jsx workflow from Exercise 10"
+        ]
+      },
+      {
+        id:"e18", num:18,
+        title:"Final Render Checklist",
+        time:"10–15 min", c4d:false,
+        c4dNote:null,
+        tip:"Always render a single test frame (F12) and check it inside AE before starting a full animation render. Catching a color management or alpha issue after a full render is a painful lesson.",
+        tasks:[
+          "Frame rate confirmed to match your AE comp",
+          "Resolution confirmed to match your AE comp",
+          "Output format set to PNG sequence with RGBA color mode",
+          "Output folder path is set and the folder exists on disk",
+          "Camera is named Main_Camera in the Outliner",
+          "Screen Empty is named Screen_Null in the Outliner",
+          ".jsx exported with both Main_Camera and Screen_Null selected",
+          "Color management decision made: Filmic or Standard view transform",
+          "Single test frame (F12) rendered and reviewed inside AE",
+          "Full animation render initiated: Ctrl + F12"
+        ]
+      }
+    ]
+  }
+];
+
+// ═══════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════
+let activePhase = 0;
+let openExercise = null;
+let checks = {};
+let userName = null;
+let syncTimer = null;
+
+// ═══════════════════════════════════════════════════════
+// GOOGLE SHEETS SYNC
+// ═══════════════════════════════════════════════════════
+function sheetEnabled() {
+  return SCRIPT_URL && SCRIPT_URL.startsWith('https://script.google.com');
+}
+
+function showSync(state) {
+  const dot = document.getElementById('sync-dot');
+  const lbl = document.getElementById('sync-lbl');
+  if (!dot || !lbl) return;
+  dot.className = 'sync-dot ' + state;
+  lbl.className = 'sync-lbl ' + state;
+  const labels = { saving:'Saving…', saved:'Saved', offline:'Offline — saved locally', loading:'Loading…' };
+  lbl.textContent = labels[state] || '';
+  if (state === 'saved') {
+    setTimeout(() => {
+      dot.className = 'sync-dot';
+      lbl.className = 'sync-lbl';
+      lbl.textContent = '';
+    }, 2500);
+  }
+}
+
+async function loadFromSheet(name) {
+  if (!sheetEnabled()) return;
+  showSync('loading');
+  try {
+    const url = `${SCRIPT_URL}?name=${encodeURIComponent(name)}`;
+    const res = await fetch(url, { redirect: 'follow' });
+    const data = await res.json();
+    if (data.success && data.checks && Object.keys(data.checks).length > 0) {
+      checks = data.checks;
+      if (typeof data.activePhase === 'number') activePhase = data.activePhase;
+      persist();
+    }
+    showSync('saved');
+  } catch(e) {
+    showSync('offline');
+  }
+}
+
+async function saveToSheet() {
+  if (!sheetEnabled() || !userName) return;
+  showSync('saving');
+  try {
+    const payload = JSON.stringify({
+      name: userName,
+      checks,
+      activePhase,
+      overallPct: totalPct(),
+      lastActive: new Date().toLocaleString('en-US', {
+        month:'short', day:'numeric', year:'numeric',
+        hour:'2-digit', minute:'2-digit'
+      })
+    });
+    await fetch(SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: payload,
+      redirect: 'follow'
+    });
+    showSync('saved');
+  } catch(e) {
+    showSync('offline');
+  }
+}
+
+function debouncedSave() {
+  clearTimeout(syncTimer);
+  if (sheetEnabled()) showSync('saving');
+  syncTimer = setTimeout(saveToSheet, 1500);
+}
+
+function persist() {
+  try { localStorage.setItem('bpd-v3', JSON.stringify({ checks, activePhase })); } catch(e) {}
+}
+
+// ═══════════════════════════════════════════════════════
+// PROGRESS CALCULATIONS
+// ═══════════════════════════════════════════════════════
+function exPct(ex) {
+  const c = checks[ex.id] || {};
+  const done = ex.tasks.filter((_,i) => c[i]).length;
+  return ex.tasks.length ? Math.round((done / ex.tasks.length) * 100) : 0;
+}
+function phasePct(phase) {
+  const total = phase.exercises.reduce((s,ex) => s + ex.tasks.length, 0);
+  const done  = phase.exercises.reduce((s,ex) => {
+    const c = checks[ex.id] || {};
+    return s + ex.tasks.filter((_,i) => c[i]).length;
+  }, 0);
+  return total ? Math.round((done / total) * 100) : 0;
+}
+function totalPct() {
+  const all   = PHASES.flatMap(p => p.exercises);
+  const total = all.reduce((s,ex) => s + ex.tasks.length, 0);
+  const done  = all.reduce((s,ex) => {
+    const c = checks[ex.id] || {};
+    return s + ex.tasks.filter((_,i) => c[i]).length;
+  }, 0);
+  return total ? Math.round((done / total) * 100) : 0;
+}
+
+// ═══════════════════════════════════════════════════════
+// RENDER
+// ═══════════════════════════════════════════════════════
+function renderOverall() {
+  const p = totalPct();
+  document.getElementById('overall-pct').textContent = p + '%';
+  document.getElementById('overall-bar').style.width = p + '%';
+}
+
+function renderTabs() {
+  document.getElementById('phase-grid').innerHTML = PHASES.map((ph,i) => {
+    const p  = phasePct(ph);
+    const ac = i === activePhase ? ' active' : '';
+    const cm = p === 100 ? ' complete' : '';
+    return `<div class="ptab${ac}${cm}" onclick="selectPhase(${i})">
+      <div class="ptab-bar" style="width:${p}%"></div>
+      <div class="ptab-num">Phase ${i+1}</div>
+      <div class="ptab-name">${ph.label}</div>
+      <div class="ptab-pct">${p}%</div>
+    </div>`;
+  }).join('');
+}
+
+function renderContent() {
+  const phase = PHASES[activePhase];
+  let html = `
+    <div class="phase-heading">
+      <div class="phase-heading-title">${phase.label}</div>
+      <div class="phase-heading-desc">${phase.desc}</div>
+    </div>
+    <div class="ex-list">`;
+
+  for (const ex of phase.exercises) {
+    const pct  = exPct(ex);
+    const done = pct === 100;
+    const open = openExercise === ex.id;
+    const c    = checks[ex.id] || {};
+
+    const c4dHtml = ex.c4d && ex.c4dNote
+      ? `<div class="callout c4d"><div class="callout-icon">↔</div><div class="callout-inner"><strong>Coming from C4D?</strong>${ex.c4dNote}</div></div>` : '';
+
+    const tipHtml = ex.tip
+      ? `<div class="callout tip"><div class="callout-icon">💡</div><div class="callout-inner"><strong>Tip</strong>${ex.tip}</div></div>` : '';
+
+    const tasksHtml = ex.tasks.map((t,i) => {
+      const ticked = c[i] || false;
+      return `<div class="task-row${ticked?' done':''}" onclick="tick('${ex.id}',${i})">
+        <div class="task-box${ticked?' ticked':''}">${ticked?'✓':''}</div>
+        <div class="task-label">${t}</div>
+      </div>`;
+    }).join('');
+
+    html += `
+      <div class="ex-card${open?' is-open':''}${done?' is-done':''}" data-exid="${ex.id}">
+        <div class="ex-head" onclick="toggleEx('${ex.id}')">
+          <div class="ex-num">${done ? '✓' : ex.num}</div>
+          <div class="ex-info">
+            <div class="ex-title">${ex.title}</div>
+            <div class="ex-prog-row">
+              <div class="track md" style="flex:1"><div class="fill" style="width:${pct}%"></div></div>
+              <div class="ex-prog-pct">${pct}%</div>
+            </div>
+          </div>
+          <div class="ex-badges">
+            <span class="badge b-time">${ex.time}</span>
+            ${ex.c4d ? '<span class="badge b-c4d">C4D</span>' : ''}
+          </div>
+          <div class="ex-chevron">▼</div>
+        </div>
+        <div class="ex-body">
+          ${c4dHtml}
+          <div class="tasks-label">Tasks</div>
+          ${tasksHtml}
+          ${tipHtml}
+          ${done ? '<div class="done-banner">🎉 Exercise Complete!</div>' : ''}
+        </div>
+      </div>`;
+  }
+
+  html += '</div>';
+  document.getElementById('content-area').innerHTML = html;
+}
+
+function renderAll() {
+  renderOverall();
+  renderTabs();
+  renderContent();
+}
+
+function updateUserBar() {
+  const bar = document.getElementById('user-bar');
+  if (!bar) return;
+  if (!userName) { bar.innerHTML = ''; return; }
+  bar.innerHTML = `Tracking progress for <strong>${userName}</strong> &nbsp;·&nbsp; <button class="user-change" onclick="changeName()">Not you?</button>`;
+}
+
+// ═══════════════════════════════════════════════════════
+// INTERACTIONS
+// ═══════════════════════════════════════════════════════
+function selectPhase(i) {
+  activePhase = i;
+  openExercise = null;
+  persist();
+  debouncedSave();
+  renderAll();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function toggleEx(id) {
+  openExercise = openExercise === id ? null : id;
+  renderContent();
+  if (openExercise) {
+    setTimeout(() => {
+      const el = document.querySelector(`[data-exid="${id}"]`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 50);
+  }
+}
+
+function tick(exId, idx) {
+  const sy = window.scrollY;
+  if (!checks[exId]) checks[exId] = {};
+  checks[exId][idx] = !checks[exId][idx];
+  persist();
+  debouncedSave();
+  renderAll();
+  window.scrollTo(0, sy);
+}
+
+// ═══════════════════════════════════════════════════════
+// MODAL
+// ═══════════════════════════════════════════════════════
+function startDashboard() {
+  const input = document.getElementById('name-input');
+  const errEl = document.getElementById('modal-error');
+  const val = input.value.trim();
+  if (!val) {
+    input.classList.add('error');
+    errEl.textContent = 'Please enter your name to continue.';
+    input.focus();
+    return;
+  }
+  userName = val;
+  localStorage.setItem('bpd-v3-user', userName);
+  document.getElementById('modal-overlay').classList.add('hidden');
+  updateUserBar();
+  loadFromSheet(userName).then(() => renderAll());
+}
+
+function changeName() {
+  if (confirm('This will end your current session. Your progress is safely saved in the team sheet. Continue?')) {
+    localStorage.removeItem('bpd-v3-user');
+    userName = null;
+    updateUserBar();
+    const input = document.getElementById('name-input');
+    input.value = '';
+    input.classList.remove('error');
+    document.getElementById('modal-error').textContent = '';
+    document.getElementById('modal-overlay').classList.remove('hidden');
+    setTimeout(() => input.focus(), 100);
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════
+async function init() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('bpd-v3') || '{}');
+    checks = saved.checks || {};
+    activePhase = typeof saved.activePhase === 'number' ? saved.activePhase : 0;
+  } catch(e) {}
+
+  renderAll();
+
+  userName = localStorage.getItem('bpd-v3-user');
+
+  if (!userName) {
+    document.getElementById('modal-overlay').classList.remove('hidden');
+    setTimeout(() => document.getElementById('name-input').focus(), 100);
+  } else {
+    updateUserBar();
+    await loadFromSheet(userName);
+    renderAll();
+  }
+}
+
+init();
+</script>
+</body>
+</html>
